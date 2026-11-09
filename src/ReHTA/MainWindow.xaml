@@ -10,4 +10,5 @@
     <Grid>
         <wv2:WebView2 x:Name="WebView"/>
     </Grid>
+
 </Window>

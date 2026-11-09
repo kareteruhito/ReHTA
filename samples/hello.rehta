@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
 <meta charset="UTF-8">
 <title>ReHTA Sample</title>
@@ -20,9 +21,13 @@
         margin-top: 10px;
         padding: 8px 20px;
     }
-</style>
 
+    #status {
+        margin-top: 15px;
+    }
+</style>
 </head>
+
 <body>
 
 <h1>ReHTA Sample</h1>
@@ -40,49 +45,6 @@
 <div id="status"></div>
 
 <script>
-    const pending = new Map();
-    let nextId = 1;
-
-    // C#からの応答
-    window.chrome.webview.addEventListener(
-        "message",
-        event => {
-            const message = event.data;
-            const request = pending.get(message.id);
-
-            if (!request) return;
-
-            pending.delete(message.id);
-
-            if (message.success) {
-                request.resolve();
-            } else {
-                request.reject(
-                    new Error(message.error)
-                );
-            }
-        }
-    );
-
-    // ReHTA API
-    const rehta = {
-        writeText(filename, text) {
-            return new Promise((resolve, reject) => {
-                const id = nextId++;
-
-                pending.set(id, { resolve, reject });
-
-                window.chrome.webview.postMessage({
-                    id: id,
-                    command: "writeText",
-                    filename: filename,
-                    text: text
-                });
-            });
-        }
-    };
-
-    // 保存処理
     async function save() {
         const text =
             document.getElementById("editor").value;
@@ -92,7 +54,9 @@
 
         try {
             await rehta.writeText("save.txt", text);
-            status.textContent = "保存しました。";
+
+            status.textContent =
+                "保存しました。";
         }
         catch (error) {
             status.textContent =
