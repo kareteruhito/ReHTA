@@ -136,6 +136,8 @@ public partial class MainWindow : Window
             string command =
                 root.GetProperty("command")
                     .GetString() ?? "";
+            
+            object? result = null;
 
             switch (command)
             {
@@ -153,6 +155,16 @@ public partial class MainWindow : Window
                     break;
                 }
 
+                case "readText":
+                {
+                    string filename =
+                        root.GetProperty("filename")
+                            .GetString() ?? "";
+
+                    result = await ReadTextAsync(filename);
+                    break;
+                }
+
                 default:
                     throw new InvalidOperationException(
                         "未対応のコマンドです。");
@@ -161,7 +173,8 @@ public partial class MainWindow : Window
             SendResponse(new
             {
                 id,
-                success = true
+                success = true,
+                result
             });
         }
         catch (Exception ex)
@@ -210,5 +223,24 @@ public partial class MainWindow : Window
 
         WebView.CoreWebView2
             .PostWebMessageAsJson(json);
+    }
+    private async Task<string> ReadTextAsync(string filename)
+    {
+        if (!Regex.IsMatch(
+            filename,
+            @"\A[A-Za-z0-9_-]{1,64}\.(txt|json)\z",
+            RegexOptions.IgnoreCase))
+        {
+            throw new ArgumentException(
+                "使用できないファイル名です。");
+        }
+
+        string path = Path.Combine(baseDirectory, filename);
+
+        if (!File.Exists(path))
+        {
+            return "";
+        }
+        return await File.ReadAllTextAsync(path);
     }
 }

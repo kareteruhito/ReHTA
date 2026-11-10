@@ -24,7 +24,7 @@
             pending.delete(message.id);
 
             if (message.success) {
-                request.resolve();
+                request.resolve(message.result);
             } else {
                 request.reject(
                     new Error(
@@ -61,6 +61,12 @@
             return invoke("writeText", {
                 filename,
                 text
+            });
+        },
+
+        readText(filename) {
+            return invoke("readText", {
+                filename
             });
         }
     };
