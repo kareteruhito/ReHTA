@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReHTA SQLite CRUD</title>
+<style>
+body { font-family:system-ui,sans-serif; margin:24px; background:#f7f7f7; color:#222; }
+main { max-width:760px; margin:auto; }
+h1 { font-size:1.5rem; }
+form { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+input { font:inherit; padding:8px; flex:1; min-width:180px; }
+button { font:inherit; padding:7px 12px; cursor:pointer; }
+li { display:flex; align-items:center; gap:8px; padding:9px 0; border-bottom:1px solid #ddd; }
+li span { flex:1; overflow-wrap:anywhere; }
+#status { min-height:1.5em; color:#555; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+<h1>ReHTA SQLite CRUD</h1>
+<p>メモを登録・一覧表示・変更・削除できます。データは crud.db に保存されます。</p>
+<form id="form">
+  <input id="memo" maxlength="500" placeholder="メモを入力" required>
+  <button type="submit">追加 (CREATE)</button>
+</form>
+<ul id="items"></ul>
+<p id="status" role="status"></p>
+</main>
+<script>
+const form = document.getElementById('form');
+const memo = document.getElementById('memo');
+const items = document.getElementById('items');
+const status = document.getElementById('status');
+
+function report(error) {
+    status.textContent = 'エラー: ' + (error?.message ?? String(error));
+}
+
+async function refresh() {
+    const rows = await rehta.sql('SELECT id, text FROM memo ORDER BY id DESC');
+    items.replaceChildren();
+    for (const row of rows) {
+        const li = document.createElement('li');
+        const label = document.createElement('span');
+        label.textContent = `${row.id}: ${row.text}`;
+        const edit = document.createElement('button');
+        edit.textContent = '変更';
+        edit.addEventListener('click', async () => {
+            const text = prompt('新しい内容', row.text);
+            if (text === null) return;
+            try {
+                await rehta.sql('UPDATE memo SET text = $0 WHERE id = $1', [text, row.id]);
+                await refresh();
+                status.textContent = '更新しました。';
+            } catch (e) { report(e); }
+        });
+        const remove = document.createElement('button');
+        remove.textContent = '削除';
+        remove.addEventListener('click', async () => {
+            if (!confirm('削除しますか？')) return;
+            try {
+                await rehta.sql('DELETE FROM memo WHERE id = $0', [row.id]);
+                await refresh();
+                status.textContent = '削除しました。';
+            } catch (e) { report(e); }
+        });
+        li.append(label, edit, remove);
+        items.append(li);
+    }
+}
+
+form.addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+        await rehta.sql('INSERT INTO memo (text) VALUES ($0)', [memo.value]);
+        memo.value = '';
+        await refresh();
+        status.textContent = '追加しました。';
+    } catch (error) { report(error); }
+});
+
+(async () => {
+    try {
+        status.textContent = "テーブル作成開始";
+
+        const result = await rehta.sql(
+            "CREATE TABLE IF NOT EXISTS memo (id INTEGER PRIMARY KEY, text TEXT NOT NULL)"
+        );
+
+        status.textContent = "テーブル作成完了: " + result;
+
+        const tables = await rehta.sql(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        );
+
+        console.log(tables);
+        status.textContent = "テーブル一覧: " + JSON.stringify(tables);
+
+        await refresh();
+
+        status.textContent = "準備完了";
+    }
+    catch (error) {
+        report(error);
+    }
+})();
+</script>
+</body>
+</html>

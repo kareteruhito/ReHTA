@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Data.Sqlite;
 
 namespace ReHTA;
 
@@ -11,6 +12,7 @@ public partial class MainWindow : Window
 {
     // .rehtaファイルが存在するディレクトリ
     private string baseDirectory = "";
+    private string databasePath = "";
     private bool initialNavigation = true;
 
     public MainWindow()
@@ -48,6 +50,9 @@ public partial class MainWindow : Window
                 throw new ArgumentException(
                     ".rehtaファイルを指定してください。");
             }
+
+            // データベースファイルのセット
+            databasePath = Path.ChangeExtension(path, ".db");
 
             // 基準ディレクトリ
             baseDirectory =
@@ -165,9 +170,18 @@ public partial class MainWindow : Window
                     break;
                 }
 
+                case "sql":
+                {
+                    string query = root.GetProperty("query").GetString() ?? "";
+                    JsonElement parameters = root.GetProperty("parameters");
+                    result = ExecuteSql(query, parameters);
+                    break;
+                }
+                
                 default:
                     throw new InvalidOperationException(
                         "未対応のコマンドです。");
+
             }
 
             SendResponse(new
@@ -243,4 +257,69 @@ public partial class MainWindow : Window
         }
         return await File.ReadAllTextAsync(path);
     }
+
+
+    private object ExecuteSql(string sql, JsonElement parameters)
+    {
+
+        
+        if (string.IsNullOrWhiteSpace(sql))
+            throw new ArgumentException("SQLが空です。");
+
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadWriteCreate
+            }.ToString());
+
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+
+        if (parameters.ValueKind != JsonValueKind.Array)
+            throw new ArgumentException("SQLパラメータは配列で指定してください。");
+
+        int index = 0;
+        foreach (var value in parameters.EnumerateArray())
+        {
+            command.Parameters.AddWithValue($"${index}", ConvertParameter(value));
+            index++;
+        }
+
+        using var reader = command.ExecuteReader();
+        if (reader.FieldCount > 0)
+        {
+            var rows = new List<Dictionary<string, object?>>();
+            while (reader.Read())
+            {
+                var row = new Dictionary<string, object?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    object? field = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                    if (field is byte[] bytes)
+                        field = Convert.ToBase64String(bytes);
+                    row[reader.GetName(i)] = field;
+                }
+                rows.Add(row);
+            }
+            return rows;
+        }
+
+        reader.Close();
+        using var changes = connection.CreateCommand();
+        changes.CommandText = "SELECT changes()";
+        return Convert.ToInt32(changes.ExecuteScalar());
+    }
+
+    private static object ConvertParameter(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString()!,
+        JsonValueKind.Number when value.TryGetInt64(out long i) => i,
+        JsonValueKind.Number => value.GetDouble(),
+        JsonValueKind.True => 1,
+        JsonValueKind.False => 0,
+        JsonValueKind.Null => DBNull.Value,
+        _ => throw new ArgumentException("SQLパラメータには文字列・数値・真偽値・nullのみ指定できます。")
+    };
 }

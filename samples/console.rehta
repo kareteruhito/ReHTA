@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReHTA JavaScript Console</title>
+<style>
+  :root { color-scheme: dark; font: 14px Consolas, 'Cascadia Code', 'Yu Gothic UI', monospace; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; background: #111820; color: #e2edf4; }
+  body { display: flex; flex-direction: column; min-height: 440px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #334452; }
+  header strong { font-size: 16px; }
+  #state { color: #89d6ba; font-size: 12px; }
+  main { display: grid; grid-template-columns: minmax(270px, 1fr) minmax(290px, 1fr); gap: 14px; padding: 14px; flex: 1; min-height: 0; }
+  .panel { display: flex; flex-direction: column; min-height: 0; gap: 10px; }
+  .caption { font-size: 12px; letter-spacing: .05em; color: #9bb8c9; }
+  .screen-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; }
+  .modes { display: flex; gap: 5px; }
+  .modes label { cursor:pointer; font-size:12px; background:#243544; padding:5px 8px; border:1px solid #4a6474; border-radius:4px; }
+  .modes label:has(input:checked) { background:#356077; color:white; border-color:#85c2d6; }
+  .modes input { accent-color:#79bfd4; vertical-align:middle; margin:0 4px 0 0; }
+  .screen-wrap { background: #05080d; display: flex; justify-content: center; align-items: center; flex:1; min-height:170px; border:1px solid #3b4d5a; border-radius:6px; padding:10px; overflow:hidden; }
+  #screen { position:relative; aspect-ratio:8/5; width:100%; max-height:100%; background:#000; overflow:hidden; }
+  #canvas, #htmlScreen { position:absolute; inset:0; width:100%; height:100%; }
+  #canvas { image-rendering:pixelated; display:block; }
+  #htmlScreen { color:#e8edf5; overflow:auto; pointer-events:none; }
+  #htmlScreen > * { pointer-events:auto; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:6px; }
+  button { font:inherit; color:#e8f5ff; background:#283c4d; border:1px solid #567183; border-radius:5px; padding:8px 11px; cursor:pointer; }
+  button:hover { background:#385367; }
+  button:focus-visible, textarea:focus-visible { outline:2px solid #7bcbd2; outline-offset:2px; }
+  button:disabled { opacity:.55; cursor:default; }
+  #output { margin:0; background:#080f15; border:1px solid #344b59; border-radius:6px; padding:12px; flex:1; min-height:165px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.55 Consolas,'Cascadia Code',monospace; }
+  .prompt { display:flex; align-items:stretch; gap:8px; }
+  .prompt label { align-self:center; font-weight:bold; color:#9be5be; }
+  textarea { width:100%; color:#e1edf5; background:#101f2a; border:1px solid #527184; border-radius:5px; padding:9px; resize:vertical; font:13px/1.5 Consolas,'Cascadia Code',monospace; }
+  #command { flex:1; min-height:43px; max-height:135px; resize:none; }
+  #program-area { display:none; flex-direction:column; min-height:150px; flex:1; gap:6px; }
+  #program { min-height:140px; flex:1; }
+  .hint { font-size:11px; line-height:1.6; color:#9bb0be; }
+  footer { padding:9px 16px; border-top:1px solid #334452; color:#9ab2bf; font-size:11px; }
+  #help-panel { display:none; position:fixed; z-index:20; top:58px; right:16px; bottom:40px; width:min(560px, calc(100vw - 32px)); background:#172632; border:1px solid #6b8a9c; box-shadow:0 12px 35px #0009; border-radius:8px; padding:16px; overflow:auto; }
+  #help-panel h2 { margin:0 0 12px; font-size:17px; }
+  #help-panel h3 { margin:18px 0 8px; font-size:14px; color:#a9dbe8; }
+  #help-panel p { font-size:12px; line-height:1.6; }
+  #help-panel code, #help-panel pre { font-family:Consolas,monospace; }
+  #help-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#07121c; border:1px solid #374e5d; border-radius:5px; padding:10px; margin:7px 0; font-size:12px; }
+  #help-panel .example { margin:9px 0 14px; }
+  #help-panel .example button { font-size:11px; padding:5px 9px; }
+  .help-top { display:flex; align-items:center; justify-content:space-between; }
+  @media (max-width:720px) { main { grid-template-columns:1fr; overflow:auto; } .screen-wrap { flex:none; height:240px; } #output { min-height:180px; } }
+</style>
+</head>
+<body>
+<header>
+  <strong>ReHTA / JavaScript Console</strong>
+  <span id="state">READY.</span>
+</header>
+<main>
+  <section class="panel">
+    <div class="screen-bar">
+      <div class="caption">SCREEN · 320 × 200</div>
+      <div class="modes" aria-label="表示モード">
+        <label><input type="radio" name="mode" value="canvas" checked>Canvas</label>
+        <label><input type="radio" name="mode" value="html">HTML</label>
+        <label><input type="radio" name="mode" value="both">両方</label>
+      </div>
+    </div>
+    <div class="screen-wrap">
+      <div id="screen">
+        <canvas id="canvas" width="320" height="200" aria-label="描画キャンバス"></canvas>
+        <div id="htmlScreen"></div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button type="button" id="list-btn">LIST</button>
+      <button type="button" id="run-btn">RUN</button>
+      <button type="button" id="new-btn">NEW</button>
+      <button type="button" id="save-btn">SAVE</button>
+      <button type="button" id="load-btn">LOAD</button>
+      <button type="button" id="help-btn" aria-expanded="false">HELP</button>
+    </div>
+    <div id="program-area">
+      <label class="caption" for="program">PROGRAM · 編集内容がRUN / SAVEの対象になります</label>
+      <textarea id="program" spellcheck="false" aria-label="保存するJavaScriptプログラム"></textarea>
+    </div>
+  </section>
+  <section class="panel">
+    <label class="caption" for="command">CONSOLE</label>
+    <pre id="output" aria-live="polite">READY.
+Enter: 実行 / Shift+Enter: 改行
+↑↓: 入力履歴
+</pre>
+    <div class="prompt">
+      <label for="command">&gt;</label>
+      <textarea id="command" rows="1" spellcheck="false" placeholder="JavaScriptを入力..."></textarea>
+      <button type="button" id="exec-btn">実行</button>
+    </div>
+    <div class="hint">入力したJavaScriptを即座に実行します。成功したコードはプログラム欄に記録されます。例や詳しい操作はHELPをご覧ください。</div>
+  </section>
+</main>
+<aside id="help-panel" role="region" aria-label="ヘルプ">
+  <div class="help-top"><h2>HELP / 使い方</h2><button type="button" id="close-help">閉じる</button></div>
+  <h3>基本操作</h3>
+  <p>入力欄にJavaScriptを入力し、Enterで実行します。Shift+Enterで改行、↑↓で過去の入力を呼び出せます。成功したコードはPROGRAMに追加されます。</p>
+  <p>LIST：プログラム欄の表示・編集 / RUN：プログラム全体を実行 / NEW：プログラム消去 / SAVE・LOAD：<code>program.txt</code>へ保存・読み込み</p>
+  <p>上部でCanvas・HTML・両方を切り替えます。表示を切り替えても描画内容やHTMLは保持されます。HTMLはCanvasの手前に重なります。</p>
+  <h3>JavaScriptの例</h3>
+  <div class="example"><pre>1 + 2 * 3</pre><button type="button" data-example="1 + 2 * 3">入力欄へ挿入</button></div>
+  <div class="example"><pre>var x = 100
+x * 2</pre><button type="button" data-example="var x = 100&#10;x * 2">入力欄へ挿入</button></div>
+  <div class="example"><pre>for (var i = 0; i &lt; 5; i++) print(i)</pre><button type="button" data-example="for (var i = 0; i &lt; 5; i++) print(i)">入力欄へ挿入</button></div>
+  <h3>Canvasの例</h3>
+  <p><code>cls()</code> 消去 / <code>color(c)</code> 色指定 / <code>pset(x,y)</code> 点 / <code>line(x1,y1,x2,y2)</code> 線 / <code>circle(x,y,r)</code> 円 / <code>rect(x,y,w,h)</code> 枠 / <code>box(x,y,w,h)</code> 塗りつぶし / <code>drawText(s,x,y)</code> 文字</p>
+  <div class="example"><pre>cls(); color('cyan'); circle(160, 100, 65)</pre><button type="button" data-example="cls(); color('cyan'); circle(160, 100, 65)">入力欄へ挿入</button></div>
+  <div class="example"><pre>cls(); for (var i = 1; i &lt; 10; i++) circle(160,100,i*9)</pre><button type="button" data-example="cls(); for (var i = 1; i &lt; 10; i++) circle(160,100,i*9)">入力欄へ挿入</button></div>
+  <h3>HTML表示の例</h3>
+  <p><code>htmlScreen</code>はHTML表示領域です。HTMLの操作にはDOM APIを利用できます。</p>
+  <div class="example"><pre>setScreenMode('html'); htmlScreen.innerHTML = '&lt;h2&gt;Hello!&lt;/h2&gt;'</pre><button type="button" data-example="setScreenMode('html'); htmlScreen.innerHTML = '&lt;h2&gt;Hello!&lt;/h2&gt;'">入力欄へ挿入</button></div>
+  <div class="example"><pre>setScreenMode('both'); htmlScreen.innerHTML = '&lt;button onclick=&quot;alert(123)&quot;&gt;Click&lt;/button&gt;'</pre><button type="button" data-example="setScreenMode('both'); htmlScreen.innerHTML = '&lt;button onclick=&quot;alert(123)&quot;&gt;Click&lt;/button&gt;'">入力欄へ挿入</button></div>
+  <h3>制限と注意</h3>
+  <p>直接入力をまたいで変数を保持する場合は<code>var</code>または<code>globalThis</code>を使ってください。<code>let</code>・<code>const</code>は別々のeval呼び出し間では共有されません。トップレベルの<code>await</code>には直接対応していません。</p>
+  <p>RUNは同じJavaScript実行環境を使用するため、以前のグローバル変数やイベントが残る場合があります。無限ループは画面を停止させます。入力したコードにはReHTAのファイル操作権限があるため、信頼できるコードだけを実行してください。</p>
+</aside>
+<footer>SAVE / LOAD: program.txt（この .rehta と同じフォルダ）</footer>
+<script>
+(() => {
+  'use strict';
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const htmlScreen = document.getElementById('htmlScreen');
+  const output = document.getElementById('output');
+  const command = document.getElementById('command');
+  const program = document.getElementById('program');
+  const programArea = document.getElementById('program-area');
+  const state = document.getElementById('state');
+  const helpPanel = document.getElementById('help-panel');
+  const helpButton = document.getElementById('help-btn');
+  const saveName = 'program.txt';
+  const commandHistory = [];
+  let historyIndex = 0;
+  let running = false;
+
+  function format(value) {
+    if (typeof value === 'string') return value;
+    if (value === undefined) return 'undefined';
+    if (value instanceof Error) return value.name + ': ' + value.message;
+    try { return JSON.stringify(value) ?? String(value); }
+    catch { return String(value); }
+  }
+  function log(...parts) {
+    output.textContent += parts.map(format).join(' ') + '\n';
+    output.scrollTop = output.scrollHeight;
+  }
+  function setBusy(value) {
+    running = value;
+    state.textContent = value ? 'RUNNING...' : 'READY.';
+    document.querySelectorAll('button:not(#close-help)').forEach(button => button.disabled = value);
+  }
+  function showHelp(show) {
+    helpPanel.style.display = show ? 'block' : 'none';
+    helpButton.setAttribute('aria-expanded', String(show));
+    if (!show) command.focus();
+  }
+  function setScreenMode(mode) {
+    if (!['canvas','html','both'].includes(mode)) throw new Error('不明な表示モード: ' + mode);
+    canvas.style.display = mode === 'html' ? 'none' : 'block';
+    htmlScreen.style.display = mode === 'canvas' ? 'none' : 'block';
+    const radio = document.querySelector('input[name="mode"][value="' + mode + '"]');
+    if (radio) radio.checked = true;
+  }
+
+  // 間接evalから使えるグローバルAPI
+  window.canvas = canvas;
+  window.ctx = ctx;
+  window.htmlScreen = htmlScreen;
+  window.setScreenMode = setScreenMode;
+  window.cls = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
+  window.color = value => { ctx.fillStyle = value; ctx.strokeStyle = value; };
+  window.pset = (x, y) => ctx.fillRect(x, y, 1, 1);
+  window.line = (x1, y1, x2, y2) => {
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  };
+  window.circle = (x, y, r) => {
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+  };
+  window.rect = (x, y, w, h) => ctx.strokeRect(x, y, w, h);
+  window.box = (x, y, w, h) => ctx.fillRect(x, y, w, h);
+  window.drawText = (value, x, y) => ctx.fillText(String(value), x, y);
+  window.print = (...parts) => log(...parts);
+  window.color('#f0f5ff');
+  setScreenMode('canvas');
+  const nativeLog = console.log.bind(console);
+  console.log = (...parts) => { nativeLog(...parts); log(...parts); };
+
+  function addToProgram(code) {
+    if (!code.trim()) return;
+    program.value += (program.value && !program.value.endsWith('\n') ? '\n' : '') + code + '\n';
+  }
+  async function evaluate(code) {
+    const value = (0, eval)(code);
+    return await value;
+  }
+  async function executeDirect() {
+    if (running) return;
+    const code = command.value.trim();
+    if (!code) return;
+    commandHistory.push(code);
+    historyIndex = commandHistory.length;
+    command.value = '';
+    log('> ' + code);
+    setBusy(true);
+    try {
+      const result = await evaluate(code);
+      addToProgram(code);
+      if (result !== undefined) log(result);
+    } catch (error) {
+      log('ERROR: ' + format(error));
+    } finally {
+      setBusy(false);
+      command.focus();
+    }
+  }
+  async function runProgram() {
+    if (running) return;
+    const code = program.value;
+    if (!code.trim()) { log('プログラムは空です。'); return; }
+    log('RUN');
+    setBusy(true);
+    try {
+      const result = await evaluate(code);
+      if (result !== undefined) log(result);
+      log('OK');
+    } catch (error) { log('ERROR: ' + format(error)); }
+    finally { setBusy(false); command.focus(); }
+  }
+  function newProgram() {
+      if (program.value.trim() &&
+          !confirm('現在のプログラムを消去しますか？')) {
+          return;
+      }
+
+      // プログラムを消去
+      program.value = '';
+
+      // コマンド入力欄を消去
+      command.value = '';
+
+      // Canvasを消去
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // HTML表示領域を消去
+      htmlScreen.replaceChildren();
+
+      // コンソールの出力を初期化
+      output.textContent = 'READY.\n';
+
+      // 入力欄にフォーカス
+      command.focus();
+  }
+  document.getElementById('exec-btn').addEventListener('click', executeDirect);
+  command.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault(); executeDirect();
+    } else if (event.key === 'ArrowUp' && !event.shiftKey && commandHistory.length && !command.value.includes('\n')) {
+      event.preventDefault();
+      historyIndex = Math.max(0, historyIndex - 1);
+      command.value = commandHistory[historyIndex];
+    } else if (event.key === 'ArrowDown' && !event.shiftKey && commandHistory.length && !command.value.includes('\n')) {
+      event.preventDefault();
+      historyIndex = Math.min(commandHistory.length, historyIndex + 1);
+      command.value = historyIndex === commandHistory.length ? '' : commandHistory[historyIndex];
+    }
+  });
+  document.querySelectorAll('input[name="mode"]').forEach(radio => radio.addEventListener('change', () => {
+    if (radio.checked) setScreenMode(radio.value);
+  }));
+  document.getElementById('help-btn').addEventListener('click', () => showHelp(helpPanel.style.display !== 'block'));
+  document.getElementById('close-help').addEventListener('click', () => showHelp(false));
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && helpPanel.style.display === 'block') showHelp(false);
+  });
+  helpPanel.querySelectorAll('[data-example]').forEach(button => button.addEventListener('click', () => {
+    command.value = button.getAttribute('data-example');
+    showHelp(false);
+    command.focus();
+  }));
+  document.getElementById('list-btn').addEventListener('click', () => {
+    const show = programArea.style.display !== 'flex';
+    programArea.style.display = show ? 'flex' : 'none';
+    if (show) program.focus(); else command.focus();
+  });
+  document.getElementById('run-btn').addEventListener('click', runProgram);
+  document.getElementById('new-btn').addEventListener('click', () => {
+    newProgram();
+    log('NEW: プログラムを消去しました。');
+    command.focus();
+  });
+  document.getElementById('save-btn').addEventListener('click', async () => {
+    if (running) return;
+    if (!window.rehta || typeof rehta.writeText !== 'function') {
+      log('ERROR: ReHTAのwriteText APIが利用できません。'); return;
+    }
+    setBusy(true);
+    try {
+      await rehta.writeText(saveName, program.value);
+      log('SAVED: ' + saveName);
+    } catch (error) { log('SAVE ERROR: ' + format(error)); }
+    finally { setBusy(false); command.focus(); }
+  });
+  document.getElementById('load-btn').addEventListener('click', async () => {
+    if (running) return;
+    if (!window.rehta || typeof rehta.readText !== 'function') {
+      log('ERROR: ReHTAのreadText APIが利用できません。'); return;
+    }
+    if (program.value.trim() && !confirm('現在のプログラムを読み込み内容で置き換えますか？')) return;
+    setBusy(true);
+    try {
+      program.value = await rehta.readText(saveName);
+      log('LOADED: ' + saveName);
+      programArea.style.display = 'flex';
+    } catch (error) { log('LOAD ERROR: ' + format(error)); }
+    finally { setBusy(false); command.focus(); }
+  });
+  command.focus();
+})();
+</script>
+</body>
+</html>

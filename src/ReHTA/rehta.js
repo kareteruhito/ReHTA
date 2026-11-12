@@ -68,7 +68,12 @@
             return invoke("readText", {
                 filename
             });
+        },
+
+        sql(query, parameters = []) {
+            return invoke("sql", { query, parameters });
         }
+
     };
 
     // グローバルAPIとして公開
