@@ -72,8 +72,10 @@
 
         sql(query, parameters = []) {
             return invoke("sql", { query, parameters });
+        },
+        ps(script) {
+            return invoke("ps", { script });
         }
-
     };
 
     // グローバルAPIとして公開

@@ -1,3 +1,0 @@
-1 + 2 * 3
-cls(); for (var i = 1; i < 10; i++) circle(160,100,i*9)
-setScreenMode('both'); htmlScreen.innerHTML = '<button onclick="alert(123)">Click</button>'

@@ -4,26 +4,27 @@
 
 かつての **HTA（HTML Application）** を現代のWeb技術で再構築するイメージで、WPF・WebView2・C#を組み合わせています。
 
-通常のHTMLとしてUIを記述し、`.rehta` ファイルをReHTAで開いて実行します。ブラウザだけでは扱いにくいローカルファイルの読み書きやSQLiteの操作を、C#側の機能として提供します。
+通常のHTMLとしてUIを記述し、`.rehta` ファイルをReHTAで開いて実行します。ブラウザだけでは扱いにくいローカルファイルの読み書き、SQLiteの操作、PowerShellの実行を、C#側の機能として提供します。
 
-現在の主なAPIは、**`readText()`、`writeText()`、`sql()`** の3つです。ReHTA上で動くメモ帳、SQLite CRUDサンプル、対話型JavaScriptコンソールなどを作成しています。
+現在の主なAPIは、**`readText()`、`writeText()`、`sql()`、`ps()`** の4つです。ReHTA上で動くメモ帳、SQLite CRUDサンプル、対話型JavaScriptコンソール、PowerShellターミナルなどを作成しています。
 
 ## 仕組み
 
 ```text
 アプリ.rehta（HTML / CSS / JavaScript）
     │
-    │ rehta.readText() / rehta.writeText() / rehta.sql()
+    │ rehta.readText() / rehta.writeText() / rehta.sql() / rehta.ps()
     ▼
 rehta.js（共通JavaScript API）
     │ WebView2のpostMessage()
     ▼
 C# / WPF
     ├─ System.IO：テキストファイルの読み書き
-    └─ Microsoft.Data.Sqlite：SQLの実行
+    ├─ Microsoft.Data.Sqlite：SQLの実行
+    └─ PowerShellプロセス：スクリプトの実行
          │
-         ▼
-    .rehtaと同じフォルダのファイル／対応する.db
+         ├─ .rehtaと同じフォルダのファイル／対応する.db
+         └─ PowerShellの実行結果
 ```
 
 C#の処理結果やエラーは、WebView2経由でJavaScriptに返します。WPFはウィンドウとOS側の処理を担当し、WebView2がHTMLの表示とJavaScriptの実行を担当します。`.rehta` にC#コードを埋め込む方式ではありません。
@@ -53,6 +54,8 @@ cd ReHTA
 dotnet run --project src/ReHTA -- samples/hello.rehta
 dotnet run --project src/ReHTA -- samples/memo.rehta
 dotnet run --project src/ReHTA -- samples/crud.rehta
+dotnet run --project src/ReHTA -- samples/console.rehta
+dotnet run --project src/ReHTA -- samples/powershell.rehta
 ```
 
 `.rehta`ファイルのパスはコマンドライン引数で渡します。現段階では、Windowsへの拡張子の関連付けや配布用インストーラーは用意していません。
@@ -96,7 +99,7 @@ samples/
 └── crud.db   （SQLを利用したときに作成）
 ```
 
-### 対話型JavaScriptコンソール
+### `console.rehta`：対話型JavaScriptコンソール
 
 ReHTA上で動くJavaScriptの対話型実行環境も作成しています。コードを入力して実行し、Canvasへの描画やHTMLのDOM操作を試せます。
 
@@ -107,6 +110,18 @@ ReHTA上で動くJavaScriptの対話型実行環境も作成しています。�
 - **HELP**：操作説明とサンプル
 
 Canvas・HTML・両方の表示モードを選べます。RUNは画面を自動消去しません。必要に応じてプログラム内で`cls()`や`htmlScreen.replaceChildren()`を実行します。
+
+### `powershell.rehta`：PowerShellターミナル
+
+ReHTAから`ps()`を呼び出し、入力したPowerShellコマンドの実行結果を表示するサンプルです。
+
+```powershell
+dotnet run --project src/ReHTA -- samples/powershell.rehta
+```
+
+`Get-ChildItem`などのコマンドを入力してEnterキーで実行します。標準出力とエラーの表示、入力履歴（↑・↓キー）、`clear`／`cls`による表示の消去に対応しています。
+
+コマンドごとに新しいPowerShellプロセスを起動する簡易ターミナルです。`cd`によるディレクトリ移動や変数の定義は次回の実行に引き継がれません。対話入力を必要とするプログラムにも対応していません。
 
 ## JavaScript API
 
@@ -175,6 +190,33 @@ SQL実行では接続文字列やデータベースファイル名を指定す�
 
 対応する`.db`ファイルは、`rehta.sql()`でSQLiteへの接続が行われるときに、存在しなければ作成されます。SQLを使わないアプリでは作成されません。
 
+### `rehta.ps(script)`
+
+PowerShellのスクリプト文字列を実行し、実行結果を返します。Windows PowerShell 5.1を使用します。
+
+```javascript
+const result = await rehta.ps("Get-ChildItem | Out-String");
+
+document.getElementById("output").textContent = result.stdout;
+```
+
+戻り値には、次のプロパティがあります。
+
+- `stdout`：標準出力の文字列
+- `stderr`：標準エラー出力の文字列
+- `exitCode`：プロセスの終了コード
+
+```javascript
+const result = await rehta.ps("Get-ChildItem");
+console.log(result.stdout);
+console.log(result.stderr);
+console.log(result.exitCode);
+```
+
+実行時間の上限は30秒です。タイムアウトなどでAPIの実行自体が失敗した場合は`Promise`が拒否されます。PowerShellコマンドがエラーを出した場合は、`stderr`や`exitCode`も確認してください。
+
+`ps()`は任意のPowerShellスクリプトを実行できるため、ファイルの削除や外部プログラムの起動なども可能です。信頼できる`.rehta`ファイルに限って利用してください。
+
 ## ファイルの場所と制限
 
 `readText()`と`writeText()`で指定できるファイル名は、英数字・アンダースコア・ハイフンからなる1～64文字の名前に`.txt`または`.json`の拡張子を付けたものです。サブディレクトリや絶対パスは指定できません。
@@ -190,6 +232,7 @@ SQLiteは`.rehta`と同じ名前の`.db`を利用しますが、SQL文そのも�
 - 相対パスで指定した外部CSS・JavaScript・画像などは、そのままでは読み込めません。
 - ファイルAPIはテキスト専用です。バイナリファイル操作やディレクトリ操作には対応していません。
 - SQLiteの処理はC#側で同期的に実行しています。JavaScriptのAPIは`Promise`形式ですが、大きなSQL処理による画面応答への影響には注意が必要です。
+- `ps()`はコマンドごとにPowerShellプロセスを起動します。PowerShellの変数やカレントディレクトリは次の実行に保持されず、対話型プログラムには対応していません。
 - JavaScriptコンソールの`eval()`は実行状態を引き継ぎます。無限ループ、タイマーの重複、グローバル変数の残存などに注意が必要です。
 - `.rehta`の拡張子関連付けや配布用インストーラーは未実装です。
 
@@ -197,7 +240,7 @@ SQLiteは`.rehta`と同じ名前の`.db`を利用しますが、SQL文そのも�
 
 **現在のReHTAは、開発者自身が作成した信頼できる`.rehta`ファイルで動作確認するための試作版です。**
 
-ページ遷移制御やメッセージ送信元・フレームの検証は十分ではありません。`sql()`はデータベースへの変更を可能にし、`readText()`と`writeText()`もローカルファイルにアクセスします。第三者が作成した`.rehta`ファイルを安全に実行できるものとして扱わないでください。
+ページ遷移制御やメッセージ送信元・フレームの検証は十分ではありません。`sql()`はデータベースへの変更を可能にし、`readText()`と`writeText()`もローカルファイルにアクセスします。さらに`ps()`はPowerShellを介してOSコマンドや外部プログラムを実行できます。第三者が作成した`.rehta`ファイルを安全に実行できるものとして扱わないでください。
 
 ## 開発の方針
 

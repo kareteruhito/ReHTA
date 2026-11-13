@@ -1,7 +1,11 @@
 ﻿using System;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Data.Sqlite;
@@ -177,7 +181,14 @@ public partial class MainWindow : Window
                     result = ExecuteSql(query, parameters);
                     break;
                 }
-                
+
+                case "ps":
+                {
+                    string script = root.GetProperty("script").GetString() ?? "";
+                    result = await ExecutePowerShellAsync(script);
+                    break;
+                }
+
                 default:
                     throw new InvalidOperationException(
                         "未対応のコマンドです。");
@@ -322,4 +333,63 @@ public partial class MainWindow : Window
         JsonValueKind.Null => DBNull.Value,
         _ => throw new ArgumentException("SQLパラメータには文字列・数値・真偽値・nullのみ指定できます。")
     };
+
+    private async Task<object> ExecutePowerShellAsync(string script)
+    {
+        if (string.IsNullOrWhiteSpace(script))
+            throw new ArgumentException("PowerShellコマンドが空です。");
+
+        if (script.Length > 16_384)
+            throw new ArgumentException("PowerShellコマンドが長すぎます。");
+
+        // Windows PowerShell 5.1。文字列は引数の引用符を気にせず渡す。
+        string setup =
+            "$ProgressPreference = 'SilentlyContinue'; " +
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); " +
+            "$OutputEncoding = [Console]::OutputEncoding; ";
+        string encoded = Convert.ToBase64String(
+            Encoding.Unicode.GetBytes(setup + script));
+
+        var info = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            WorkingDirectory = baseDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+        info.ArgumentList.Add("-NoLogo");
+        info.ArgumentList.Add("-NoProfile");
+        info.ArgumentList.Add("-NonInteractive");
+        info.ArgumentList.Add("-EncodedCommand");
+        info.ArgumentList.Add(encoded);
+
+        using var process = new Process { StartInfo = info };
+        process.Start();
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = process.StandardError.ReadToEndAsync();
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+            throw new TimeoutException("PowerShellの実行が30秒を超えました。");
+        }
+
+        return new
+        {
+            exitCode = process.ExitCode,
+            stdout = await stdout,
+            stderr = await stderr
+        };
+    }
 }

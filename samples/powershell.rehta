@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReHTA PowerShell</title>
+<style>
+  :root { color-scheme: dark; font-family: Consolas, 'Cascadia Mono', monospace; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #0c111b; color: #dbe7f4; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px;
+           background: #161f30; border-bottom: 1px solid #2d3d56; }
+  header strong { color: #91d9ff; font-size: 15px; }
+  header span { font-size: 12px; color: #94a7bb; }
+  #screen { flex: 1; overflow-y: auto; padding: 20px; white-space: pre-wrap;
+            overflow-wrap: anywhere; line-height: 1.55; font-size: 14px; }
+  .entry { margin-bottom: 14px; }
+  .prompt { color: #6ee7a0; }
+  .error { color: #ff9a9a; }
+  .hint { color: #92a8c3; }
+  form { display: flex; gap: 12px; align-items: center; background: #161f30;
+         padding: 14px 18px; border-top: 1px solid #2d3d56; }
+  form label { flex-shrink: 0; color: #6ee7a0; }
+  #command { flex: 1; min-width: 0; color: #fff; background: transparent; border: 0;
+             outline: none; font: inherit; }
+  button { border: 1px solid #42608b; border-radius: 5px; color: #e5efff;
+           background: #263c5a; padding: 7px 13px; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+</style>
+</head>
+<body>
+<header><strong>ReHTA / PowerShell</strong><span id="status">READY</span></header>
+<main id="screen" aria-live="polite"><div class="hint">Windows PowerShell 5.1 · コマンドを入力してEnter<br>例: Get-ChildItem / Get-Date / Get-Process | Select-Object -First 5<br>↑ ↓ で履歴、clear で画面消去</div></main>
+<form id="form">
+  <label for="command">PS&gt;</label>
+  <input id="command" autocomplete="off" spellcheck="false" autofocus aria-label="PowerShellコマンド">
+  <button id="run" type="submit">実行</button>
+  <button id="clear" type="button">消去</button>
+</form>
+<script>
+(() => {
+  const form = document.getElementById('form');
+  const command = document.getElementById('command');
+  const screen = document.getElementById('screen');
+  const status = document.getElementById('status');
+  const run = document.getElementById('run');
+  const history = [];
+  let historyIndex = 0;
+  let running = false;
+
+  function append(text, className = '') {
+    const line = document.createElement('div');
+    line.className = 'entry ' + className;
+    line.textContent = text;
+    screen.appendChild(line);
+    screen.scrollTop = screen.scrollHeight;
+  }
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (running) return;
+    const text = command.value.trim();
+    if (!text) return;
+    command.value = '';
+    if (text.toLowerCase() === 'clear' || text.toLowerCase() === 'cls') {
+      screen.replaceChildren();
+      return;
+    }
+    history.push(text);
+    historyIndex = history.length;
+    append('PS> ' + text, 'prompt');
+    running = true;
+    run.disabled = true;
+    status.textContent = 'RUNNING';
+    try {
+      const result = await rehta.ps(text);
+      if (result.stdout) append(result.stdout.trimEnd());
+      if (result.stderr) append(result.stderr.trimEnd(), 'error');
+      if (result.exitCode !== 0) append('[終了コード: ' + result.exitCode + ']', 'error');
+      if (!result.stdout && !result.stderr && result.exitCode === 0) append('(出力なし)', 'hint');
+    } catch (error) {
+      append('ERROR: ' + error.message, 'error');
+    } finally {
+      running = false;
+      run.disabled = false;
+      status.textContent = 'READY';
+      command.focus();
+    }
+  });
+
+  command.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    if (event.key === 'ArrowUp') historyIndex = Math.max(0, historyIndex - 1);
+    else historyIndex = Math.min(history.length, historyIndex + 1);
+    command.value = history[historyIndex] ?? '';
+    command.setSelectionRange(command.value.length, command.value.length);
+  });
+  document.getElementById('clear').addEventListener('click', () => {
+    screen.replaceChildren();
+    command.focus();
+  });
+  command.focus();
+})();
+</script>
+</body>
+</html>

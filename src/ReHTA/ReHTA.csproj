@@ -1,24 +1,24 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets/App.ico</ApplicationIcon>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
   </ItemGroup>
-
   <ItemGroup>
-      <Content Include="rehta.js">
-          <CopyToOutputDirectory>
+    <Content Include="rehta.js">
+      <CopyToOutputDirectory>
               PreserveNewest
           </CopyToOutputDirectory>
-      </Content>
+    </Content>
   </ItemGroup>
-
+  <ItemGroup>
+    <Resource Include="Assets\**\*.*" />
+  </ItemGroup>
 </Project>
