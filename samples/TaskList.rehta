@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>タスク一覧</title>
+    <style>
+        body { font: 14px "Segoe UI", sans-serif; margin: 16px; }
+        #status { margin-left: 12px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { border: 1px solid #ccc; padding: 5px 8px; }
+        th { background: #eee; text-align: left; }
+        td:not(:first-child), th:not(:first-child) { text-align: right; }
+        tbody tr:nth-child(even) { background: #f7f7f7; }
+    </style>
+</head>
+<body>
+    <button id="refresh">更新</button>
+    <span id="status" role="status"></span>
+    <table>
+        <thead>
+            <tr>
+                <th>プロセス名</th>
+                <th>PID</th>
+                <th>CPU時間（秒）</th>
+                <th>メモリ（MB）</th>
+            </tr>
+        </thead>
+        <tbody id="tasks"></tbody>
+    </table>
+    <script>
+        const refresh = document.getElementById("refresh");
+        const status = document.getElementById("status");
+        const tbody = document.getElementById("tasks");
+
+        async function loadTasks() {
+            refresh.disabled = true;
+            status.textContent = "取得中...";
+
+            try {
+                const result = await rehta.pwsh(`
+                    $tasks = @(Get-Process |
+                        Sort-Object ProcessName, Id |
+                        Select-Object ProcessName, Id,
+                            @{Name='CPUSeconds'; Expression={
+                                if ($null -ne $_.CPU) {
+                                    [math]::Round($_.CPU, 2)
+                                }
+                            }},
+                            @{Name='MemoryMB'; Expression={
+                                [math]::Round($_.WorkingSet64 / 1MB, 1)
+                            }})
+                    ConvertTo-Json -InputObject $tasks -Compress
+                `);
+
+                if (result.exitCode !== 0) {
+                    throw new Error(result.stderr || `終了コード: ${result.exitCode}`);
+                }
+
+                const tasks = JSON.parse(result.stdout);
+                const fragment = document.createDocumentFragment();
+                for (const task of tasks) {
+                    const tr = document.createElement("tr");
+                    for (const value of [
+                        task.ProcessName,
+                        task.Id,
+                        task.CPUSeconds?.toFixed(2) ?? "-",
+                        task.MemoryMB?.toFixed(1) ?? "-"
+                    ]) {
+                        tr.insertCell().textContent = String(value);
+                    }
+                    fragment.appendChild(tr);
+                }
+                tbody.replaceChildren(fragment);
+                status.textContent = `${tasks.length} 件`;
+            } catch (error) {
+                status.textContent = `取得失敗: ${error.message ?? error}`;
+            } finally {
+                refresh.disabled = false;
+            }
+        }
+
+        refresh.addEventListener("click", loadTasks);
+        loadTasks();
+    </script>
+</body>
+</html>
