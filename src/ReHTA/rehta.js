@@ -73,8 +73,13 @@
         sql(query, parameters = []) {
             return invoke("sql", { query, parameters });
         },
+
         ps(script) {
             return invoke("ps", { script });
+        },
+        
+        pwsh(script) {
+            return invoke("pwsh", { script });
         }
     };
 

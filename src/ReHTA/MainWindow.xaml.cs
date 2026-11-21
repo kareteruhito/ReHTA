@@ -183,9 +183,11 @@ public partial class MainWindow : Window
                 }
 
                 case "ps":
+                case "pwsh":
                 {
                     string script = root.GetProperty("script").GetString() ?? "";
-                    result = await ExecutePowerShellAsync(script);
+                    result = await ExecutePowerShellAsync(
+                        script, command == "pwsh");
                     break;
                 }
 
@@ -334,14 +336,20 @@ public partial class MainWindow : Window
         _ => throw new ArgumentException("SQLパラメータには文字列・数値・真偽値・nullのみ指定できます。")
     };
 
-    private async Task<object> ExecutePowerShellAsync(string script)
+    private async Task<object> ExecutePowerShellAsync(
+        string script, bool usePowerShell7 = false)
     {
         if (string.IsNullOrWhiteSpace(script))
             throw new ArgumentException("PowerShellコマンドが空です。");
 
         if (script.Length > 16_384)
             throw new ArgumentException("PowerShellコマンドが長すぎます。");
-
+        
+        if (usePowerShell7)
+        {
+            script = "$PSStyle.OutputRendering = 'PlainText';\n" + script;
+        }
+        
         // Windows PowerShell 5.1。文字列は引数の引用符を気にせず渡す。
         string setup =
             "$ProgressPreference = 'SilentlyContinue'; " +
@@ -352,7 +360,7 @@ public partial class MainWindow : Window
 
         var info = new ProcessStartInfo
         {
-            FileName = "powershell.exe",
+            FileName = usePowerShell7 ? "pwsh.exe" : "powershell.exe",
             WorkingDirectory = baseDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,

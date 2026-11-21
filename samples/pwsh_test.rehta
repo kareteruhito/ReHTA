@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>PowerShell 動作確認</title>
+</head>
+<body>
+    <button onclick="run(false)">PowerShell 5.1</button>
+    <button onclick="run(true)">PowerShell 7</button>
+
+    <pre id="output"></pre>
+
+    <script>
+        async function run(usePwsh) {
+            const output = document.getElementById("output");
+
+            try {
+                const script = `
+                    $PSVersionTable
+                    Write-Output "日本語の出力テスト"
+                `;
+
+                const result = usePwsh
+                    ? await rehta.pwsh(script)
+                    : await rehta.ps(script);
+
+                output.textContent =
+                    result.stdout + "\n" + result.stderr;
+            } catch (e) {
+                output.textContent = String(e);
+            }
+        }
+    </script>
+</body>
+</html>

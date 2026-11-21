@@ -6,14 +6,15 @@
 
 通常のHTMLとしてUIを記述し、`.rehta` ファイルをReHTAで開いて実行します。ブラウザだけでは扱いにくいローカルファイルの読み書き、SQLiteの操作、PowerShellの実行を、C#側の機能として提供します。
 
-現在の主なAPIは、**`readText()`、`writeText()`、`sql()`、`ps()`** の4つです。ReHTA上で動くメモ帳、SQLite CRUDサンプル、対話型JavaScriptコンソール、PowerShellターミナルなどを作成しています。
+現在の主なAPIは、**`readText()`、`writeText()`、`sql()`、`ps()`、`pwsh()`** の5つです。ReHTA上で動くメモ帳、SQLite CRUDサンプル、対話型JavaScriptコンソール、PowerShellターミナルなどを作成しています。
 
 ## 仕組み
 
 ```text
 アプリ.rehta（HTML / CSS / JavaScript）
     │
-    │ rehta.readText() / rehta.writeText() / rehta.sql() / rehta.ps()
+    │ rehta.readText() / rehta.writeText() / rehta.sql()
+    │ rehta.ps() / rehta.pwsh()
     ▼
 rehta.js（共通JavaScript API）
     │ WebView2のpostMessage()
@@ -21,13 +22,14 @@ rehta.js（共通JavaScript API）
 C# / WPF
     ├─ System.IO：テキストファイルの読み書き
     ├─ Microsoft.Data.Sqlite：SQLの実行
-    └─ PowerShellプロセス：スクリプトの実行
+    ├─ powershell.exe：Windows PowerShell 5.1の実行
+    └─ pwsh.exe：PowerShell 7の実行
          │
          ├─ .rehtaと同じフォルダのファイル／対応する.db
          └─ PowerShellの実行結果
 ```
 
-C#の処理結果やエラーは、WebView2経由でJavaScriptに返します。WPFはウィンドウとOS側の処理を担当し、WebView2がHTMLの表示とJavaScriptの実行を担当します。`.rehta` にC#コードを埋め込む方式ではありません。
+C#の処理結果やエラーは、WebView2経由でJavaScriptに返します。WPFはウィンドウとOS側の処理を担当し、WebView2がHTMLの表示とJavaScriptの実行を担当します。通常は`.rehta`にC#コードを記述する必要はありません。PowerShellを経由して.NETの機能や外部コマンドなども利用できます。
 
 共通の通信処理は`rehta.js`に分離してあり、WebView2の初期化時に自動登録されます。`.rehta`側で`rehta.js`を読み込む必要はありません。
 
@@ -36,6 +38,9 @@ C#の処理結果やエラーは、WebView2経由でJavaScriptに返します。
 - Windows 11
 - .NET 10 SDK（ソースからビルド・実行する場合）
 - Microsoft Edge WebView2 Runtime
+- .NET 10 Desktop Runtime（ランタイムを同梱しない配布版を実行する場合）
+- Windows PowerShell 5.1（`ps()`を使用する場合）
+- PowerShell 7（`pwsh()`を使用する場合。`pwsh.exe`が起動できる環境が必要）
 
 NuGetパッケージとして`Microsoft.Web.WebView2`と`Microsoft.Data.Sqlite`を利用します。
 
@@ -59,6 +64,20 @@ dotnet run --project src/ReHTA -- samples/powershell.rehta
 ```
 
 `.rehta`ファイルのパスはコマンドライン引数で渡します。現段階では、Windowsへの拡張子の関連付けや配布用インストーラーは用意していません。
+
+### Windows x64向けのビルドと配布
+
+```powershell
+dotnet build src/ReHTA -c Release -r win-x64
+```
+
+.NET Runtimeを同梱せずに配布用ファイルを生成する場合は、次のコマンドを実行します。
+
+```powershell
+dotnet publish src/ReHTA -c Release -r win-x64 --self-contained false -o publish/win-x64
+```
+
+配布先には.NET 10 Desktop RuntimeとWebView2 Runtimeが必要です。`pwsh()`を使用する場合はPowerShell 7も必要です。
 
 ## サンプル
 
@@ -215,7 +234,37 @@ console.log(result.exitCode);
 
 実行時間の上限は30秒です。タイムアウトなどでAPIの実行自体が失敗した場合は`Promise`が拒否されます。PowerShellコマンドがエラーを出した場合は、`stderr`や`exitCode`も確認してください。
 
-`ps()`は任意のPowerShellスクリプトを実行できるため、ファイルの削除や外部プログラムの起動なども可能です。信頼できる`.rehta`ファイルに限って利用してください。
+### `rehta.pwsh(script)`
+
+PowerShell 7でスクリプト文字列を実行し、実行結果を返します。`ps()`と同じ形式で利用できますが、起動する実行ファイルは`pwsh.exe`です。
+
+```javascript
+const result = await rehta.pwsh("Get-ChildItem | Out-String");
+
+document.getElementById("output").textContent = result.stdout;
+```
+
+戻り値は`ps()`と共通で、`stdout`、`stderr`、`exitCode`の3つのプロパティを持ちます。実行時間の上限も同じく30秒です。
+
+PowerShell 7が付加するANSI文字装飾を抑制するため、実行するスクリプトの先頭で`$PSStyle.OutputRendering = 'PlainText'`を設定しています。この設定はPowerShell 7.2以降で利用できます。外部プログラムが出力するANSI制御コードまで除去するものではありません。
+
+### PowerShellの使い分け
+
+```javascript
+// Windows PowerShell 5.1（powershell.exe）
+const ps = await rehta.ps("$PSVersionTable");
+console.log(ps.stdout);
+
+// PowerShell 7（pwsh.exe）
+const pwsh = await rehta.pwsh("$PSVersionTable");
+console.log(pwsh.stdout);
+```
+
+既存の`ps()`はWindows PowerShell 5.1を使用するため、従来のスクリプトはそのまま利用できます。PowerShell 7を利用したい場合は`pwsh()`を選択します。PowerShellのバージョンによって、利用できるモジュールや.NETの機能が異なります。
+
+Windows PowerShell 5.1（5.1.26100.10068）とPowerShell 7（7.6.8）で、バージョン情報および日本語の標準出力を確認しています。
+
+`ps()`と`pwsh()`は任意のPowerShellスクリプトを実行できるため、ファイルの削除や外部プログラムの起動なども可能です。信頼できる`.rehta`ファイルに限って利用してください。
 
 ## ファイルの場所と制限
 
@@ -232,7 +281,7 @@ SQLiteは`.rehta`と同じ名前の`.db`を利用しますが、SQL文そのも�
 - 相対パスで指定した外部CSS・JavaScript・画像などは、そのままでは読み込めません。
 - ファイルAPIはテキスト専用です。バイナリファイル操作やディレクトリ操作には対応していません。
 - SQLiteの処理はC#側で同期的に実行しています。JavaScriptのAPIは`Promise`形式ですが、大きなSQL処理による画面応答への影響には注意が必要です。
-- `ps()`はコマンドごとにPowerShellプロセスを起動します。PowerShellの変数やカレントディレクトリは次の実行に保持されず、対話型プログラムには対応していません。
+- `ps()`と`pwsh()`はコマンドごとにPowerShellプロセスを起動します。PowerShellの変数やカレントディレクトリは次の実行に保持されず、対話型プログラムには対応していません。
 - JavaScriptコンソールの`eval()`は実行状態を引き継ぎます。無限ループ、タイマーの重複、グローバル変数の残存などに注意が必要です。
 - `.rehta`の拡張子関連付けや配布用インストーラーは未実装です。
 
@@ -240,7 +289,7 @@ SQLiteは`.rehta`と同じ名前の`.db`を利用しますが、SQL文そのも�
 
 **現在のReHTAは、開発者自身が作成した信頼できる`.rehta`ファイルで動作確認するための試作版です。**
 
-ページ遷移制御やメッセージ送信元・フレームの検証は十分ではありません。`sql()`はデータベースへの変更を可能にし、`readText()`と`writeText()`もローカルファイルにアクセスします。さらに`ps()`はPowerShellを介してOSコマンドや外部プログラムを実行できます。第三者が作成した`.rehta`ファイルを安全に実行できるものとして扱わないでください。
+ページ遷移制御やメッセージ送信元・フレームの検証は十分ではありません。`sql()`はデータベースへの変更を可能にし、`readText()`と`writeText()`もローカルファイルにアクセスします。さらに`ps()`と`pwsh()`はPowerShellを介してOSコマンドや外部プログラムを実行できます。第三者が作成した`.rehta`ファイルを安全に実行できるものとして扱わないでください。
 
 ## 開発の方針
 
@@ -254,3 +303,4 @@ HTML・CSS・JavaScriptの標準機能で実現できることはできるだけ
 - [Microsoft Learn: WebView2をWPFアプリで使用する](https://learn.microsoft.com/ja-jp/microsoft-edge/webview2/get-started/wpf)
 - [Microsoft Learn: WebView2でWebコンテンツとネイティブ側のコードを通信させる](https://learn.microsoft.com/en-us/microsoft-edge/webview2/how-to/communicate-btwn-web-native)
 - [Microsoft Learn: Microsoft.Data.Sqlite](https://learn.microsoft.com/ja-jp/dotnet/standard/data/sqlite/)
+- [Microsoft Learn: WindowsへのPowerShellのインストール](https://learn.microsoft.com/ja-jp/powershell/scripting/install/installing-powershell-on-windows)
