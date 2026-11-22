@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>プロンプト禁止文字削除ツール</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; height: 100vh; padding: 12px; font: 14px "Segoe UI", sans-serif; color: #222; background: #f5f5f5; display: flex; flex-direction: column; gap: 10px; }
+        h1 { margin: 0; font-size: 18px; }
+        .columns { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; }
+        .prompts { flex: 1; min-height: 150px; }
+        .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; }
+        label { font-weight: 600; }
+        textarea { width: 100%; min-height: 0; border: 1px solid #aaa; border-radius: 3px; padding: 7px; font: 14px/1.5 Consolas, "Yu Gothic UI", monospace; background: white; color: #222; }
+        .prompts textarea { flex: 1; resize: none; }
+        .rules textarea { height: 135px; resize: vertical; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+        #output { background: #fff; }
+        button { font: inherit; padding: 5px 13px; cursor: pointer; }
+        button:disabled { cursor: default; }
+        .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .hint { font-size: 12px; color: #555; }
+        #status { overflow-wrap: anywhere; }
+        #status.error { color: #a51d1d; }
+        #count { margin-left: auto; }
+        @media (max-width: 500px) { body { height: auto; min-height: 100vh; } .columns { grid-template-columns: 1fr; } .prompts textarea { min-height: 140px; } }
+    </style>
+</head>
+<body>
+    <h1>プロンプト禁止文字削除ツール</h1>
+    <div class="columns prompts">
+        <div class="field">
+            <label for="input">置き換え元（プロンプト）</label>
+            <textarea id="input" placeholder="プロンプトを入力" spellcheck="false"></textarea>
+        </div>
+        <div class="field">
+            <label for="output">置き換え先（結果）</label>
+            <textarea id="output" readonly spellcheck="false" placeholder="置き換え結果"></textarea>
+        </div>
+    </div>
+    <div class="bar">
+        <button id="replace" type="button">置き換え</button>
+        <button id="copy" type="button">結果をクリップボードへコピー</button>
+        <span id="count" class="hint"></span>
+    </div>
+    <div class="columns rules">
+        <div class="field">
+            <label for="targets">置き換え対象文字（禁止文字）</label>
+            <textarea id="targets" wrap="off" spellcheck="false" placeholder="1行に1つの文字列"></textarea>
+        </div>
+        <div class="field">
+            <label for="replacements">置き換え後文字</label>
+            <textarea id="replacements" wrap="off" spellcheck="false" placeholder="同じ行の置き換え後文字（空欄なら削除）"></textarea>
+        </div>
+    </div>
+    <div class="hint">左右の同じ行が1組です。上から順に置き換えます。検索は大文字・小文字を区別し、正規表現は使用しません。</div>
+    <div class="bar">
+        <button id="save" type="button" disabled>設定を保存</button>
+        <span id="status" role="status" aria-live="polite"></span>
+    </div>
+    <script>
+        const SETTINGS_FILE = "prompt_rules.json";
+        const $ = id => document.getElementById(id);
+        const input = $("input");
+        const output = $("output");
+        const targets = $("targets");
+        const replacements = $("replacements");
+        const save = $("save");
+
+        function setStatus(message, error = false) {
+            $("status").textContent = message;
+            $("status").classList.toggle("error", error);
+        }
+
+        // 空の検索文字列は無視する。空白だけの文字列は有効。
+        function readPairs(targetText, replacementText) {
+            const from = targetText.split(/\r\n|\r|\n/);
+            const to = replacementText.split(/\r\n|\r|\n/);
+            return from.map((search, i) => ({
+                search,
+                replacement: to[i] ?? ""
+            })).filter(pair => pair.search !== "");
+        }
+
+        // 正規表現や置換文字列の $ 特殊展開を利用しない。
+        function applyPairs(text, pairs) {
+            let count = 0;
+            for (const {search, replacement} of pairs) {
+                const parts = text.split(search);
+                count += parts.length - 1;
+                text = parts.join(replacement);
+            }
+            return { text, count };
+        }
+
+        function currentPairs() {
+            return readPairs(targets.value, replacements.value);
+        }
+
+        function update() {
+            const pairs = currentPairs();
+            const result = applyPairs(input.value, pairs);
+            output.value = result.text;
+            $("count").textContent = `設定 ${pairs.length} 件 / 一致 ${result.count} 件`;
+        }
+
+        function hasFileApi() {
+            return typeof rehta !== "undefined" &&
+                typeof rehta.readText === "function" &&
+                typeof rehta.writeText === "function";
+        }
+
+        function validLine(value) {
+            return typeof value === "string" && !/[\r\n]/.test(value);
+        }
+
+        function parseSettings(text) {
+            const pairs = JSON.parse(text.replace(/^\uFEFF/, ""));
+            if (!Array.isArray(pairs) || !pairs.every(pair =>
+                pair && validLine(pair.search) && pair.search !== "" &&
+                validLine(pair.replacement))) {
+                throw new Error("設定ファイルの形式が正しくありません。");
+            }
+            return pairs;
+        }
+
+        async function loadSettings() {
+            if (!hasFileApi()) {
+                setStatus("ブラウザ表示：設定ファイルの読み書きはReHTA専用です。");
+                return;
+            }
+            targets.disabled = replacements.disabled = true;
+            let loaded = false;
+            try {
+                const text = await rehta.readText(SETTINGS_FILE);
+                if (text.trim() !== "") {
+                    const pairs = parseSettings(text);
+                    targets.value = pairs.map(pair => pair.search).join("\n");
+                    replacements.value = pairs.map(pair => pair.replacement).join("\n");
+                    setStatus(`設定を読み込みました（${pairs.length}件）。`);
+                } else {
+                    setStatus("設定ファイルはまだありません。");
+                }
+                loaded = true;
+            } catch (error) {
+                setStatus("設定の読み込みに失敗しました。元のファイルを確認してください：" + error.message, true);
+            } finally {
+                targets.disabled = replacements.disabled = false;
+                // 読み込みに失敗した既存ファイルの誤上書きを避ける。
+                save.disabled = !loaded;
+                update();
+            }
+        }
+
+        async function saveSettings() {
+            save.disabled = true;
+            try {
+                const pairs = currentPairs();
+                await rehta.writeText(SETTINGS_FILE, JSON.stringify(pairs, null, 2));
+                setStatus(`設定を保存しました（${pairs.length}件）：${SETTINGS_FILE}`);
+            } catch (error) {
+                setStatus("設定の保存に失敗しました：" + error.message, true);
+            } finally {
+                save.disabled = false;
+            }
+        }
+
+        async function copyResult() {
+            update();
+            output.focus();
+            output.select();
+            // NavigateToString で表示したHTMLでもユーザー操作でコピーを試みる。
+            try {
+                if (document.execCommand("copy")) {
+                    setStatus("結果をクリップボードへコピーしました。");
+                    return;
+                }
+            } catch { /* Clipboard API を試す */ }
+            try {
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+                    await navigator.clipboard.writeText(output.value);
+                    setStatus("結果をクリップボードへコピーしました。");
+                    return;
+                }
+            } catch { /* 手動コピーを案内する */ }
+            output.focus();
+            output.select();
+            setStatus("自動コピーできませんでした。選択した結果を Ctrl+C でコピーしてください。", true);
+        }
+
+        for (const element of [input, targets, replacements]) {
+            element.addEventListener("input", update);
+        }
+        // 左右の設定欄をスクロール連動させる。
+        targets.addEventListener("scroll", () => { replacements.scrollTop = targets.scrollTop; });
+        replacements.addEventListener("scroll", () => { targets.scrollTop = replacements.scrollTop; });
+        $("replace").addEventListener("click", update);
+        $("copy").addEventListener("click", copyResult);
+        save.addEventListener("click", saveSettings);
+        update();
+        loadSettings();
+    </script>
+</body>
+</html>
